@@ -1,0 +1,13 @@
+streamlit
+pdfplumber
+pdf2image
+Pillow
+pytesseract
+sentence-transformers
+scipy
+numpy
+langdetect
+# Ειδικοί σύνδεσμοι για τα SpaCy Models (el και en)
+# Απαραίτητοι για να τα εγκαταστήσει σωστά το Streamlit Cloud
+https://github.com/explosion/spacy-models/releases/download/el_core_news_sm-3.7.0/el_core_news_sm-3.7.0.tar.gz#el_core_news_sm
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz#en_core_web_sm
