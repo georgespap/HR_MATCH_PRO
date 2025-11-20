@@ -1,28 +1,55 @@
 # -*- coding: utf-8 -*-
 """ HR CV Matcher - Batch mode (ΟΛΟΚΛΗΡΩΜΕΝΗ ΚΑΙ ΤΕΛΙΚΗ ΕΚΔΟΣΗ - V121 - FIX: Forced Download Button Uniformity)
-@author: g.papadopoulos + updates GPT 
+@author: g.papadopoulos + updates GPT   
 """
 import streamlit as st
+
 import pdfplumber
 from pdf2image import convert_from_bytes
 from PIL import Image
-import pytesseract
 from sentence_transformers import SentenceTransformer, util
 import re
 import unicodedata
 from io import BytesIO
-import spacy
 from langdetect import detect
 import base64
 import zipfile 
-import numpy as np 
+import numpy as np  
 import math 
+import spacy
+from spacy.cli import download
+
+# --- Ρύθμιση Tesseract OCR ---
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Users\g.papadopoulos\OneDrive - Nea Tileorasi S.A. - Star Channel\Desktop\Tesseract-OCR\tesseract.exe"
+
+# --- Ρύθμιση Poppler για pdf2image ---
+from pdf2image import convert_from_path
+poppler_path=r"C:\Users\g.papadopoulos\OneDrive - Nea Tileorasi S.A. - Star Channel\Desktop\Release-25.11.0-0\poppler-25.11.0\Library\bin"
+
+
+
 
 # --------------------------------------------------------------------------------------
+# --- 1. ΦΟΡΤΩΣΗ ΜΟΝΤΕΛΩΝ & ΕΓΚΑΤΑΣΤΑΣΗ ΑΠΑΡΑΙΤΗΤΩΝ ΠΑΚΕΤΩΝ ---
+# --------------------------------------------------------------------------------------
+
+# Ensure Greek model is installed
+try:
+    spacy.load("el_core_news_sm")
+except OSError:
+    download("el_core_news_sm")
+
+# Ensure English model is installed
+try:
+    spacy.load("en_core_web_sm")
+except OSError:
+    download("en_core_web_sm")
+
 # --- CUSTOM CSS ΓΙΑ BACKGROUND, ΜΑΥΡΗ ΓΡΑΜΜΑΤΟΣΕΙΡΑ & ΑΝΟΙΧΤΟΤΕΡΑ INPUT FIELDS ---
 def get_base64_image(image_path):
+    """Μετατρέπει την εικόνα σε base64 string για χρήση στο CSS."""
     try:
-        # Υποθέτουμε ότι το STAR_logo.jpg βρίσκεται στον ίδιο φάκελο
         with open(image_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     except Exception:
@@ -301,6 +328,13 @@ st.markdown(bg_style, unsafe_allow_html=True)
 if background_image_error:
     st.error(f"⚠️ Προσοχή: Δεν βρέθηκε η εικόνα φόντου ('{background_image_path}'). Βεβαιωθείτε ότι το αρχείο υπάρχει στον ίδιο φάκελο.")
 # --------------------------------------------------------------------------------------
+
+
+
+# --------------------------------------------------------------------------------------
+# --- 2. STOPWORDS & ΦΟΡΤΩΣΗ ΜΟΝΤΕΛΩΝ NLP/EMBEDDING (CACHED) ---
+# --------------------------------------------------------------------------------------
+
 # --- Stopwords ---
 GREEK_STOPWORDS = {
     'ο','η','το','οι','τα','του','της','των','και','με','σε','για','από','ως','ένα','μια','ένας','είναι',
@@ -321,6 +355,7 @@ GREEK_STOPWORDS = {
 # --- Φόρτωση SpaCy & SentenceTransformer ---
 @st.cache_data(show_spinner=False)
 def load_spacy_models():
+    """Φορτώνει τα μοντέλα SpaCy για ελληνικά και αγγλικά."""
     models = {}
     try: models['el'] = spacy.load("el_core_news_sm")
     except: models['el'] = None
@@ -330,6 +365,7 @@ def load_spacy_models():
 
 @st.cache_data(show_spinner=False)
 def load_sentence_transformer_model():
+    """Φορτώνει το SentenceTransformer μοντέλο."""
     try: return SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
     except: return None
 
@@ -342,13 +378,18 @@ ENGLISH_STOPWORDS = set()
 if nlp_gr: GREEK_STOPWORDS = GREEK_STOPWORDS.union(nlp_gr.Defaults.stop_words)
 if nlp_en: ENGLISH_STOPWORDS = nlp_en.Defaults.stop_words
 
+# Προσπάθεια ορισμού διαδρομής Tesseract για OCR
 try:
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 except:
     pass 
 
-# --- Βοηθητικές Συναρτήσεις ---
+# --------------------------------------------------------------------------------------
+# --- 3. ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ ---
+# --------------------------------------------------------------------------------------
+
 def normalize_text(text):
+    """Κανονικοποιεί το κείμενο (lowercase, αφαίρεση τόνων/συμβόλων)."""
     if not text: return ""
     text = text.lower()
     text = unicodedata.normalize('NFKD', text)
@@ -359,10 +400,11 @@ def normalize_text(text):
 # 1. 💾 Caching της Εξαγωγής Κειμένου
 @st.cache_data(show_spinner=False)
 def extract_text_from_pdf_cached(pdf_file_contents, file_name):
-    """Εξάγει κείμενο από PDF."""
+    """Εξάγει κείμενο από PDF. Χρησιμοποιεί pdfplumber και πέφτει σε OCR (tesseract) αν αποτύχει."""
     text = ""
     pdf_file = BytesIO(pdf_file_contents)
     
+    # Προσπάθεια με pdfplumber
     try:
         with pdfplumber.open(pdf_file) as pdf:
             for page in pdf.pages:
@@ -371,10 +413,11 @@ def extract_text_from_pdf_cached(pdf_file_contents, file_name):
     except: pass
     text = text.strip()
     
+    # Αν αποτύχει, δοκιμάζει με OCR
     if not text:
         try:
             pdf_file.seek(0)
-            images = convert_from_bytes(pdf_file.read(), dpi=300)
+            images = convert_from_bytes(pdf_file.read(), dpi=300, poppler_path=poppler_path)
             ocr_text = [pytesseract.image_to_string(img, lang='ell+eng') for img in images]
             text = " ".join([t for t in ocr_text if t]).strip()
         except: 
@@ -385,34 +428,42 @@ def extract_text_from_pdf_cached(pdf_file_contents, file_name):
 # 2. ⚡️ Caching Embeddings
 @st.cache_data(show_spinner=False)
 def get_embeddings_cached(text_list):
-    """Κωδικοποιεί μια λίστα κειμένων."""
+    """Κωδικοποιεί μια λίστα κειμένων σε embeddings."""
     if not model: return None
     return model.encode(text_list, convert_to_numpy=True)
 
-# ΔΙΟΡΘΩΜΕΝΗ ΣΥΝΑΡΤΗΣΗ compute_similarity
+# 3. Υπολογισμός Σημασιολογικής Ομοιότητας
 def compute_similarity(cv_text, job_text, job_text_chunks, emb_job):
+    """Υπολογίζει τη μέγιστη ομοιότητα μεταξύ των τμημάτων του CV και του JD."""
     if not model: return 0.0
     cv_text = normalize_text(cv_text)
     if not cv_text or not job_text: return 0.0
     
+    # Διαχωρισμός CV σε μικρά τμήματα (προτάσεις)
     splitter = r'[\.!\?\n;:]+'
     cv_chunks = [c.strip() for c in re.split(splitter, cv_text) if len(c.strip())>10]
     if not cv_chunks: cv_chunks = [cv_text]
     
     emb_cv = get_embeddings_cached(cv_chunks)
     
+    # Υπολογισμός ομοιότητας Cosine μεταξύ CV chunks και JD chunks
     # Χρησιμοποιούμε απευθείας τα NumPy arrays (emb_cv και emb_job)
     sim_matrix = util.cos_sim(emb_cv, emb_job).cpu().numpy()
     
+    # Βρίσκουμε τη μέγιστη ομοιότητα για κάθε CV chunk έναντι ΟΛΩΝ των JD chunks
     max_per_cv = sim_matrix.max(axis=1)
     
+    # Επιστρέφουμε τη μέγιστη ομοιότητα μεταξύ όλων των CV chunks
     return round(float(max_per_cv.max())*100,2)
 
+# 4. Υπολογισμός Keywords Match
 def calculate_keyword_match(cv_text, job_text):
+    """Εξάγει keywords (ουσιαστικά, επίθετα, κύρια ονόματα) και υπολογίζει το match."""
     if not nlp_gr and not nlp_en: return [],0.0
     POS_FILTERS = {"NOUN","ADJ","PROPN"}
     
     def get_filtered_lemmas(text):
+        """Εξάγει λήμματα, φιλτράροντας με βάση POS και Stopwords."""
         if not text: return set()
         try: lang=detect(text)
         except: lang='en'
@@ -426,17 +477,27 @@ def calculate_keyword_match(cv_text, job_text):
         
     cv_lemmas = get_filtered_lemmas(cv_text)
     job_lemmas = get_filtered_lemmas(job_text)
+    
     matched = cv_lemmas.intersection(job_lemmas)
+    
+    # Σκορ = (Matched Keywords / Συνολικά JD Keywords) * 100
     score = round(min((len(matched)/len(job_lemmas)*100 if job_lemmas else 0.0),100.0),2)
     return sorted(list(matched)), score
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="HR Match Pro", layout="wide") 
+# --------------------------------------------------------------------------------------
+# --- 4. STREAMLIT UI LAYOUT & LOGIC ---
+# --------------------------------------------------------------------------------------
+
+
 
 # V111: Αρχικοποίηση Session State για το disabled state
 if 'top_n_disabled' not in st.session_state:
     st.session_state['top_n_disabled'] = False
     
+# ------------------ Streamlit Page Config ------------------
+st.set_page_config(page_title="HR Match Pro", layout="wide")
+  
+# --- Τίτλος Εφαρμογής ---
 st.markdown("""
 <div style="text-align: center; line-height: 1.2; margin-top: 1em;">
 <h1 style="margin-bottom:0px; color:#000000;">HR Match Pro</h1>
@@ -450,6 +511,7 @@ try:
 except: 
     pass
 
+# --- Warnings για αποτυχημένη φόρτωση μοντέλων ---
 if not nlp_gr: st.error("⚠️ Το ελληνικό μοντέλο SpaCy δεν φορτώθηκε.")
 if not model: st.error("⚠️ Αποτυχία φόρτωσης SentenceTransformer.")
 
@@ -459,55 +521,50 @@ st.markdown("---")
 col_left, col_center, col_right = st.columns([0.3, 0.4, 0.3])
 
 with col_center:
+    
     # ----------------------------------------------------------------------------------
-    # --- 1. INPUTS: (ΠΛΗΡΩΣ ΚΑΤΑΚΟΡΥΦΑ) ---
+    # --- 1. INPUTS ---
     # ----------------------------------------------------------------------------------
 
-    # 1. CV Uploader
     st.markdown("<h3 style='font-size: 1.2em; color:#000000;'>1. Εισαγωγή Δεδομένων</h3>", unsafe_allow_html=True)
+    
+    # CV Uploader
     st.markdown("<h6>Ανέβασμα Βιογραφικών (PDF)</h6>", unsafe_allow_html=True)
     cv_files = st.file_uploader("", type=["pdf"], accept_multiple_files=True, key="cv_upload") 
     cv_warning_placeholder = st.empty()
 
-    # 2. JD Text Area
+    # JD Text Area
     st.markdown("<h6>Περιγραφή Θέσης Εργασίας (JD)</h6>", unsafe_allow_html=True)
     job_text = st.text_area("", height=150, placeholder="Εισάγετε εδώ την πλήρη περιγραφή της θέσης εργασίας...", key="jd_text_area") 
     jd_warning_placeholder = st.empty()
 
-    # ⚠️ ΔΙΟΡΘΩΣΗ: Μικρότερο κενό αντί για st.markdown("---")
     st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True) 
 
     # ----------------------------------------------------------------------------------
-    # --- 2. ΡΥΘΜΙΣΗ ΒΑΡΥΤΗΤΑΣ (ΠΛΗΡΩΣ ΚΑΤΑΚΟΡΥΦΑ) ---
+    # --- 2. ΡΥΘΜΙΣΗ ΒΑΡΥΤΗΤΑΣ ---
     # ----------------------------------------------------------------------------------
 
     st.markdown("<h3 style='font-size: 1.2em; color:#000000;'>2. Ρύθμιση Βαρύτητας</h3>", unsafe_allow_html=True)
 
-    # V106: Αφαίρεση του default τίτλου του slider και αντικατάσταση με Markdown για να δώσουμε χώρο
+    # Slider για Βάρος Σημασιολογικής Ομοιότητας
     st.markdown("<h6>Βάρος Σημασιολογικής Ομοιότητας (%)<br><br></h6>", unsafe_allow_html=True)
 
-    # Χρησιμοποιούμε όλο το πλάτος της κεντρικής στήλης
     weight_sem = st.slider("", min_value=0, max_value=100, value=70, step=5, key="weight_slider") 
     
-    # V107: Προσθήκη κενού μετά τον slider και πριν το μήνυμα συνολικού σκορ
     st.markdown("<br>", unsafe_allow_html=True) 
 
     weight_kw = 100 - weight_sem
     st.markdown(f"<h6>(Συνολικό Σκορ = **{weight_sem}%** Σημασιολογικό + **{weight_kw}%** Keywords)</h6>", unsafe_allow_html=True)
 
-    # ⚠️ ΔΙΟΡΘΩΣΗ: Μικρότερο κενό αντί για st.markdown("---")
     st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True) 
 
     # ----------------------------------------------------------------------------------
-    # --- 3. ΕΠΙΛΟΓΕΣ ΕΜΦΑΝΙΣΗΣ (ΠΛΗΡΩΣ ΚΑΤΑΚΟΡΥΦΑ) ---
+    # --- 3. ΕΠΙΛΟΓΕΣ ΕΜΦΑΝΙΣΗΣ ---
     # ----------------------------------------------------------------------------------
 
     st.markdown("<h3 style='font-size: 1.2em; color:#000000;'>3. Επιλογές Εμφάνισης</h3>", unsafe_allow_html=True)
     
-    # V111 FIX: Σωστή οπτική σειρά (Top N πάνω, Checkbox κάτω) με Session State
-    
-    # 1. Number Input (Εμφανίζεται πρώτο)
-    # ⚠️ Η ετικέτα είναι bold με Markdown.
+    # Number Input (Εμφάνιση Top N)
     top_n_default = st.number_input(
         "**Εμφάνιση Top N Βιογραφικών**", 
         min_value=1, 
@@ -517,7 +574,7 @@ with col_center:
         disabled=st.session_state.top_n_disabled # Χρησιμοποιεί την Session State
     )
     
-    # 2. Checkbox (Εμφανίζεται δεύτερο - τώρα με on_change callback για να ενημερώσει το disabled state του Top N)
+    # Checkbox (Εμφάνιση Όλων)
     show_all = st.checkbox(
         "Εμφάνιση Όλων", 
         value=False, 
@@ -525,34 +582,34 @@ with col_center:
         on_change=toggle_show_all # Callback που τρέχει και ενημερώνει το disabled state
     )
 
-    # 3. Ορίζουμε την τιμή του top_n με τη σωστή λογική
+    # Ορισμός της τιμής του top_n
     top_n = 999999 if show_all else int(top_n_default)
 
     st.markdown("---")
         
-    # 4. Κουμπί Εκτέλεσης (στο πλήρες πλάτος της κεντρικής στήλης)
+    # Κουμπί Εκτέλεσης
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
     analyze_button = st.button("Εκτέλεση Ανάλυσης", type="primary", key="analyze_button", use_container_width=True)
 
     # ----------------------------------------------------------------------------------
-    # --- 5. ΑΠΟΤΕΛΕΣΜΑΤΑ: ΚΑΤΩ ΑΠΟ ΤΟ ΚΟΥΜΠΙ (ΠΛΗΡΩΣ ΚΑΤΑΚΟΡΥΦΑ) ---
+    # --- 5. ΑΠΟΤΕΛΕΣΜΑΤΑ ---
     # ----------------------------------------------------------------------------------
 
     if analyze_button:
         
-        # Επανεκκίνηση της μεταβλητής errors εντός του block
+        # Έλεγχος Σφαλμάτων
         errors = False
-        
-        # Εμφάνιση warning messages 
         if not cv_files:
             cv_warning_placeholder.warning("⚠️ **1. Ανέβασμα τουλάχιστον ενός Βιογραφικού (PDF)**")
             errors = True
-        
         if not job_text.strip():
             jd_warning_placeholder.warning("⚠️ **2. Εισαγωγή της Περιγραφής Θέσης (JD) για να εκτελεστεί η ανάλυση.**")
             errors = True
+        if not nlp_gr or not model:
+            # Αυτό το σφάλμα εμφανίζεται ήδη πάνω, αλλά το βάζουμε για να σταματήσει η εκτέλεση
+            errors = True
 
-        if not errors and nlp_gr and model:
+        if not errors:
             results = []
             
             # 1. Κωδικοποίηση JD μία φορά (Cached)
@@ -570,7 +627,7 @@ with col_center:
             
             with st.spinner("⚙️ Εκτέλεση ανάλυσης... Παρακαλώ περιμένετε..."):
                 for cv_file in cv_files:
-                    cv_file_contents = cv_content_map[cv_file.name] # Αποθηκεύουμε το περιεχόμενο μία φορά
+                    cv_file_contents = cv_content_map[cv_file.name] 
 
                     # 3. Εξαγωγή κειμένου CV (Cached)
                     cv_text = extract_text_from_pdf_cached(cv_file_contents, cv_file.name)
@@ -590,6 +647,7 @@ with col_center:
                     })
             
             if results:
+                # Ταξινόμηση και Εμφάνιση
                 results = sorted(results, key=lambda x: x['final_score'], reverse=True)
                 display_count = min(top_n,len(results))
                 header_text = f"Όλα τα CVs ({len(results)})" if show_all else f"Top {display_count} Βιογραφικά"
@@ -597,7 +655,7 @@ with col_center:
                 st.markdown("<h3 style='font-size: 1.2em; color:#000000;'>Αποτελέσματα Ταύτισης</h3>", unsafe_allow_html=True)
                 st.markdown(f"<p style='font-size: 1.05em; font-weight: bold; color:#000000;'>{header_text}</p>", unsafe_allow_html=True)
                 
-                # Download All Button
+                # Download All Button (ZIP)
                 if len(results) > 1:
                     zip_buffer = BytesIO()
                     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -616,11 +674,7 @@ with col_center:
                     )
                     st.markdown("---")
 
-                
-                # -------------------------------------------------------------
                 # ΕΜΦΑΝΙΣΗ ΑΠΟΤΕΛΕΣΜΑΤΩΝ (Μία ΣΤΗΛΗ)
-                # -------------------------------------------------------------
-                
                 results_to_display = results[:display_count]
                 
                 for data_index in range(display_count):
@@ -665,6 +719,8 @@ with col_center:
 
             st.markdown("---")
         else:
-            # Αυτό θα εμφανιστεί μόνο αν δεν υπήρξαν σφάλματα (errors=False) αλλά το results ήταν άδειο (π.χ. άδειο PDF)
-            st.warning("⚠️ Δεν βρέθηκαν αποτελέσματα για ανάλυση.")
-        pass
+            # Μήνυμα αν δεν υπήρξαν αποτελέσματα για ανάλυση (π.χ. άδεια PDFs)
+            if not errors: # Αν τα αρχικά σφάλματα ήταν False, αλλά το results είναι άδειο
+                 st.warning("⚠️ Δεν βρέθηκαν αποτελέσματα για ανάλυση.")
+        pass # End of analyze_button block
+# --------------------------------------------------------------------------------------
