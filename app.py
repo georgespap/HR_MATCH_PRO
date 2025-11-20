@@ -3,6 +3,7 @@
 @author: g.papadopoulos + updates GPT   
 """
 import streamlit as st
+
 import pdfplumber
 from pdf2image import convert_from_bytes
 from PIL import Image
@@ -13,7 +14,7 @@ from io import BytesIO
 from langdetect import detect
 import base64
 import zipfile 
-import numpy as np 
+import numpy as np  
 import math 
 import spacy
 from spacy.cli import download
@@ -25,6 +26,8 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Users\g.papadopoulos\OneDrive - Nea
 # --- Ρύθμιση Poppler για pdf2image ---
 from pdf2image import convert_from_path
 poppler_path=r"C:\Users\g.papadopoulos\OneDrive - Nea Tileorasi S.A. - Star Channel\Desktop\Release-25.11.0-0\poppler-25.11.0\Library\bin"
+
+
 
 
 # --------------------------------------------------------------------------------------
@@ -326,6 +329,8 @@ if background_image_error:
     st.error(f"⚠️ Προσοχή: Δεν βρέθηκε η εικόνα φόντου ('{background_image_path}'). Βεβαιωθείτε ότι το αρχείο υπάρχει στον ίδιο φάκελο.")
 # --------------------------------------------------------------------------------------
 
+
+
 # --------------------------------------------------------------------------------------
 # --- 2. STOPWORDS & ΦΟΡΤΩΣΗ ΜΟΝΤΕΛΩΝ NLP/EMBEDDING (CACHED) ---
 # --------------------------------------------------------------------------------------
@@ -483,12 +488,15 @@ def calculate_keyword_match(cv_text, job_text):
 # --- 4. STREAMLIT UI LAYOUT & LOGIC ---
 # --------------------------------------------------------------------------------------
 
-st.set_page_config(page_title="HR Match Pro", layout="wide") 
+
 
 # V111: Αρχικοποίηση Session State για το disabled state
 if 'top_n_disabled' not in st.session_state:
     st.session_state['top_n_disabled'] = False
     
+# ------------------ Streamlit Page Config ------------------
+st.set_page_config(page_title="HR Match Pro", layout="wide")
+  
 # --- Τίτλος Εφαρμογής ---
 st.markdown("""
 <div style="text-align: center; line-height: 1.2; margin-top: 1em;">
